@@ -1,17 +1,25 @@
 import { Router, Request, Response } from 'express';
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage, AIMessage, BaseMessage } from '@langchain/core/messages';
-import { Transaction, AIMessage as AppAIMessage } from '../types.js';
+import { Transaction, AIMessage as AppAIMessage } from '../types';
 import {
   generateMockRiskReport,
   generateMockSingleTransactionAnalysis,
   generateMockChatResponse,
-} from '../mockDataGenerator.js';
+} from '../mockDataGenerator';
 import {
   createLLMClient,
   getConfiguredProvider,
   LLMProvider,
-} from '../llmConfig.js';
+} from '../llmConfig';
+import {
+  A2UIMessage,
+  A2UIComponent,
+  createSurfaceUpdate,
+  createDataModelUpdate,
+  createBeginRendering,
+  createDeleteSurface,
+} from '../a2uiTypes';
 
 export const aiRouter = Router();
 
@@ -88,116 +96,144 @@ props: { label: "标签", name: "字段名", options: [{ label: "显示文本", 
 用于包裹表单元素。
 props: { layout: "vertical"|"horizontal" }`;
 
-// 场景模板
-const scenarioTemplates = `## 场景模板
+// A2UI 消息格式说明
+const a2uiMessageFormat = `## A2UI 消息格式
 
-### 场景1：风险分析报告（必须包含导出按钮）
+你必须返回以下 4 种消息类型之一，每种消息类型对应不同的 UI 操作：
 
-返回格式：
+### 1. beginRendering - 开始渲染
+在开始生成 UI 前发送，表示正在加载。
 {
-  "content": "文字说明",
-  "uiSchema": {
-    "component": "Container",
-    "children": [
-      {
-        "component": "Card",
-        "props": { "title": "风险分析报告", "variant": "highlight" },
-        "children": [
-          {
-            "component": "Grid",
-            "props": { "columns": 4 },
-            "children": [
-              { "component": "Statistic", "props": { "label": "总交易数", "value": "10" } },
-              { "component": "Statistic", "props": { "label": "总金额", "value": "50000", "prefix": "¥" } },
-              { "component": "Statistic", "props": { "label": "风险交易", "value": "2", "status": "warning" } },
-              { "component": "Statistic", "props": { "label": "风险等级", "value": "中", "status": "warning" } }
-            ]
-          }
-        ]
-      },
-      {
-        "component": "Card",
-        "props": { "title": "交易明细" },
-        "children": [
-          { "component": "Table", "props": { "columns": [...], "dataSource": [...], "bordered": true } }
-        ]
-      },
-      {
-        "component": "Button",
-        "props": { "text": "导出报告", "variant": "primary", "action": "export" }
-      }
-    ]
+  "type": "beginRendering",
+  "message": "正在生成分析报告..."
+}
+
+### 2. surfaceUpdate - 更新 UI
+发送完整的 UI 组件树，前端会渲染这些组件。
+{
+  "type": "surfaceUpdate",
+  "components": [
+    {
+      "component": "Card",
+      "props": { "title": "风险分析报告", "variant": "highlight" },
+      "children": [...]
+    }
+  ]
+}
+
+### 3. dataModelUpdate - 更新数据
+更新表单或组件的数据状态。
+{
+  "type": "dataModelUpdate",
+  "data": {
+    "totalAmount": 50000,
+    "riskLevel": "中"
   }
 }
 
-### 场景2：单笔交易分析（必须包含查询表单）
-
-返回格式：
+### 4. deleteSurface - 删除 UI
+清除当前显示的 UI。
 {
-  "content": "文字说明",
-  "uiSchema": {
-    "component": "Container",
-    "children": [
-      {
-        "component": "Card",
-        "props": { "title": "交易详情", "variant": "highlight" },
-        "children": [
-          {
-            "component": "Grid",
-            "props": { "columns": 4 },
-            "children": [
-              { "component": "Statistic", "props": { "label": "交易金额", "value": "15000", "prefix": "¥" } },
-              { "component": "Statistic", "props": { "label": "交易状态", "value": "已完成", "status": "success" } },
-              { "component": "Statistic", "props": { "label": "风险等级", "value": "低", "status": "success" } },
-              { "component": "Statistic", "props": { "label": "交易渠道", "value": "网银" } }
-            ]
-          }
-        ]
-      },
-      {
-        "component": "Grid",
-        "props": { "columns": 2 },
-        "children": [
-          {
-            "component": "Card",
-            "props": { "title": "基本信息" },
-            "children": [
-              { "component": "Descriptions", "props": { "items": [...] } }
-            ]
-          },
-          {
-            "component": "Card",
-            "props": { "title": "风险信息" },
-            "children": [
-              { "component": "Descriptions", "props": { "items": [...] } }
-            ]
-          }
-        ]
-      },
-      {
-        "component": "Card",
-        "props": { "title": "查询更多详情" },
-        "children": [
-          {
-            "component": "Stack",
-            "props": { "direction": "vertical", "gap": "md" },
-            "children": [
-              {
-                "component": "Stack",
-                "props": { "direction": "horizontal", "gap": "md" },
-                "children": [
-                  { "component": "Input", "props": { "label": "交易流水号", "name": "serialNumber", "placeholder": "输入流水号查询" } },
-                  { "component": "Select", "props": { "label": "查询类型", "name": "queryType", "options": [{ "label": "账户信息", "value": "account" }, { "label": "风险详情", "value": "risk" }, { "label": "审计日志", "value": "audit" }] } }
-                ]
-              },
-              { "component": "Button", "props": { "text": "查询详情", "variant": "primary", "action": "query" } }
-            ]
-          }
-        ]
-      }
-    ]
-  }
+  "type": "deleteSurface",
+  "message": "已清除分析结果"
+}
+
+## 响应规则
+
+1. 每次响应只返回一种消息类型
+2. 消息必须是有效的 JSON 格式
+3. 不要添加任何 markdown 代码块标记
+4. 风险分析场景：先 beginRendering，再 surfaceUpdate
+5. 单笔交易分析：先 beginRendering，再多次 surfaceUpdate（逐步展示）
+6. 用户请求清除时：使用 deleteSurface`;
+
+// 场景模板
+const scenarioTemplates = `## 场景示例
+
+### 场景1：风险分析报告
+
+步骤1 - 发送 beginRendering：
+{
+  "type": "beginRendering",
+  "message": "正在分析 5 笔交易..."
+}
+
+步骤2 - 发送 surfaceUpdate：
+{
+  "type": "surfaceUpdate",
+  "components": [
+    {
+      "component": "Card",
+      "props": { "title": "风险分析报告", "variant": "highlight" },
+      "children": [
+        {
+          "component": "Grid",
+          "props": { "columns": 4 },
+          "children": [
+            { "component": "Statistic", "props": { "label": "总交易数", "value": "5" } },
+            { "component": "Statistic", "props": { "label": "总金额", "value": "50000", "prefix": "¥" } },
+            { "component": "Statistic", "props": { "label": "风险交易", "value": "1", "status": "warning" } },
+            { "component": "Statistic", "props": { "label": "风险等级", "value": "中", "status": "warning" } }
+          ]
+        }
+      ]
+    },
+    {
+      "component": "Card",
+      "props": { "title": "交易明细" },
+      "children": [
+        { "component": "Table", "props": { "columns": [...], "dataSource": [...], "bordered": true } }
+      ]
+    },
+    {
+      "component": "Button",
+      "props": { "text": "导出报告", "variant": "primary", "action": "export" }
+    }
+  ]
+}
+
+### 场景2：单笔交易分析（流式更新）
+
+步骤1：
+{
+  "type": "beginRendering",
+  "message": "正在分析交易 TX001..."
+}
+
+步骤2（先展示概览）：
+{
+  "type": "surfaceUpdate",
+  "components": [
+    {
+      "component": "Card",
+      "props": { "title": "交易概览", "variant": "highlight" },
+      "children": [
+        { "component": "Statistic", "props": { "label": "交易金额", "value": "15000", "prefix": "¥" } }
+      ]
+    }
+  ]
+}
+
+步骤3（追加详细信息）：
+{
+  "type": "surfaceUpdate",
+  "components": [
+    {
+      "component": "Card",
+      "props": { "title": "交易详情" },
+      "children": [
+        { "component": "Descriptions", "props": { "items": [...] } }
+      ]
+    }
+  ]
 }`;
+
+// 流式发送 A2UI 消息
+async function streamA2UIMessage(res: Response, message: A2UIMessage) {
+  const messageStr = JSON.stringify(message);
+  res.write(messageStr + '\n');
+  await new Promise(resolve => setTimeout(resolve, 50)); // 模拟网络延迟
+}
 
 // AI Review 接口 - 初始分析
 aiRouter.post('/review', async (req: Request, res: Response) => {
@@ -213,27 +249,25 @@ aiRouter.post('/review', async (req: Request, res: Response) => {
       return;
     }
 
+    // 设置 SSE 响应头
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
     // 如果是模拟模式，返回预设的 UI Schema
     if (mode === 'mock') {
       console.log('Using mock mode for AI review');
+      
+      // 1. 发送 beginRendering 消息
+      await streamA2UIMessage(res, createBeginRendering(undefined, `正在分析 ${transactions.length} 笔交易...`));
+      
+      // 2. 模拟延迟后发送 surfaceUpdate
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       const uiSchema = generateMockRiskReport(transactions);
       
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      
-      // 模拟流式响应
-      const response = JSON.stringify({
-        content: '已完成交易风险分析，以下是详细报告：',
-        uiSchema,
-      });
-      
-      // 分块发送，模拟流式效果
-      const chunkSize = 50;
-      for (let i = 0; i < response.length; i += chunkSize) {
-        res.write(response.slice(i, i + chunkSize));
-        await new Promise(resolve => setTimeout(resolve, 20));
-      }
+      // 3. 发送 surfaceUpdate 消息
+      await streamA2UIMessage(res, createSurfaceUpdate(uiSchema.children || []));
       
       res.end();
       return;
@@ -243,28 +277,20 @@ aiRouter.post('/review', async (req: Request, res: Response) => {
     const llmProvider = provider || getConfiguredProvider();
     const client = createLLMClient({ provider: llmProvider });
 
-    const systemPrompt = `你是一个专业的银行交易分析师。
+    const systemPrompt = `你是一个专业的银行交易分析师。你必须返回 A2UI 消息格式。
 
 ${componentPrompt}
 
-## 响应格式
+${a2uiMessageFormat}
 
-返回纯 JSON 格式（不要 markdown 代码块）：
-{
-  "content": "文字说明",
-  "uiSchema": {
-    "component": "Container",
-    "children": [组件数组]
-  }
-}
+${scenarioTemplates}
 
 ## 重要规则
 
-1. 使用 component 字段指定组件名称（不是 type）
-2. 所有子组件必须放在 children 数组中
+1. 每次只返回一种消息类型的 JSON
+2. 不要添加 markdown 代码块标记
 3. 风险分析报告必须包含导出按钮（Button with action: "export"）
-4. 单笔交易分析必须包含查询表单
-5. 返回纯 JSON，不要 markdown 代码块`;
+4. 先发送 beginRendering，再发送 surfaceUpdate`;
 
     const transactionSummary = transactions.map(t => 
       `${t.id}: ${t.type === 'income' ? '收入' : t.type === 'expense' ? '支出' : '转账'} ¥${t.amount} - ${t.counterparty}`
@@ -275,14 +301,11 @@ ${componentPrompt}
 ${transactionSummary}
 
 要求：
-1. 生成交易概览卡片（使用Grid 4列布局展示统计信息）
-2. 生成交易明细表格
-3. 必须添加导出按钮
-4. 直接返回JSON，不要代码块标记`;
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
+1. 先发送 beginRendering 消息
+2. 然后发送包含完整分析的 surfaceUpdate 消息
+3. 生成交易概览卡片（使用Grid 4列布局展示统计信息）
+4. 生成交易明细表格
+5. 必须添加导出按钮`;
 
     try {
       const stream = await client.stream([
@@ -290,16 +313,36 @@ ${transactionSummary}
         new HumanMessage(userPrompt)
       ]);
 
+      let buffer = '';
       for await (const chunk of stream) {
         if (chunk.content) {
-          res.write(chunk.content.toString());
+          const content = chunk.content.toString();
+          buffer += content;
+          
+          // 尝试发送完整的 JSON 消息
+          // 检测是否是完整的 JSON（以换行分隔）
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // 保留最后一行不完整的
+          
+          for (const line of lines) {
+            if (line.trim()) {
+              res.write(line + '\n');
+            }
+          }
         }
+      }
+      
+      // 发送剩余的 buffer
+      if (buffer.trim()) {
+        res.write(buffer);
       }
     } catch (streamError) {
       console.error('Stream error:', streamError);
-      res.write(JSON.stringify({ 
-        error: `AI 调用失败: ${streamError instanceof Error ? streamError.message : '未知错误'}` 
-      }));
+      // 发送错误消息
+      await streamA2UIMessage(res, {
+        type: 'deleteSurface',
+        message: `AI 调用失败: ${streamError instanceof Error ? streamError.message : '未知错误'}`
+      });
     }
 
     res.end();
@@ -325,25 +368,25 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
       return;
     }
 
+    // 设置 SSE 响应头
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
     // 如果是模拟模式，返回预设的 UI Schema
     if (mode === 'mock') {
       console.log('Using mock mode for AI chat');
+      
+      // 1. 发送 beginRendering 消息
+      await streamA2UIMessage(res, createBeginRendering(undefined, '正在生成响应...'));
+      
+      // 2. 模拟延迟后发送 surfaceUpdate
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
       const uiSchema = generateMockChatResponse(message, transactions);
       
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      
-      const response = JSON.stringify({
-        content: '根据您的请求，我已生成相关分析报告：',
-        uiSchema,
-      });
-      
-      const chunkSize = 50;
-      for (let i = 0; i < response.length; i += chunkSize) {
-        res.write(response.slice(i, i + chunkSize));
-        await new Promise(resolve => setTimeout(resolve, 20));
-      }
+      // 3. 发送 surfaceUpdate 消息
+      await streamA2UIMessage(res, createSurfaceUpdate(uiSchema.children || []));
       
       res.end();
       return;
@@ -361,9 +404,11 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
       }
     });
 
-    const systemPrompt = `你是一个专业的银行交易分析师助手。
+    const systemPrompt = `你是一个专业的银行交易分析师助手。你必须返回 A2UI 消息格式。
 
 ${componentPrompt}
+
+${a2uiMessageFormat}
 
 ${scenarioTemplates}
 
@@ -375,16 +420,10 @@ ${transactions.map(t =>
 
 ## 响应规则
 
-1. 返回纯 JSON 格式，不要 markdown 代码块
-2. 使用 component 字段指定组件名称（不是 type）
-3. 所有子组件必须放在 children 数组中
-4. 风险分析报告必须包含导出按钮
-5. 单笔交易分析必须包含查询表单（流水号输入框、查询类型下拉框、查询按钮）
-6. 使用 Grid 组件实现多列自适应布局`;
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
+1. 每次只返回一种消息类型的 JSON
+2. 不要添加 markdown 代码块标记
+3. 风险分析报告必须包含导出按钮
+4. 单笔交易分析必须包含查询表单`;
 
     try {
       const stream = await client.stream([
@@ -393,21 +432,52 @@ ${transactions.map(t =>
         new HumanMessage(message)
       ]);
 
+      let buffer = '';
       for await (const chunk of stream) {
         if (chunk.content) {
-          res.write(chunk.content.toString());
+          const content = chunk.content.toString();
+          buffer += content;
+          
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.trim()) {
+              res.write(line + '\n');
+            }
+          }
         }
+      }
+      
+      if (buffer.trim()) {
+        res.write(buffer);
       }
     } catch (streamError) {
       console.error('Stream error:', streamError);
-      res.write(JSON.stringify({ 
-        error: `AI 调用失败: ${streamError instanceof Error ? streamError.message : '未知错误'}` 
-      }));
+      await streamA2UIMessage(res, {
+        type: 'deleteSurface',
+        message: `AI 调用失败: ${streamError instanceof Error ? streamError.message : '未知错误'}`
+      });
     }
 
     res.end();
   } catch (error) {
     console.error('AI Chat error:', error);
     res.status(500).json({ error: 'AI chat failed' });
+  }
+});
+
+// 清除 Surface 接口
+aiRouter.post('/clear', async (req: Request, res: Response) => {
+  try {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    await streamA2UIMessage(res, createDeleteSurface(undefined, '已清除分析结果'));
+    res.end();
+  } catch (error) {
+    console.error('Clear surface error:', error);
+    res.status(500).json({ error: 'Clear surface failed' });
   }
 });

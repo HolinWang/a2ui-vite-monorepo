@@ -4,7 +4,7 @@ import TransactionTable from './components/TransactionTable';
 import AIDialog from './components/AIDialog';
 import SettingsPanel, { AIMode, LLMProvider } from './components/SettingsPanel';
 import { mockTransactions } from './data/mockData';
-import { AIMessage, A2UIComponent } from './types';
+import { AIMessage, A2UIMessage } from './types';
 
 const App: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -12,10 +12,60 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [messages, setMessages] = useState<AIMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [aiMode, setAIMode] = useState<AIMode>('mock'); // 默认使用模拟模式
-  const [llmProvider, setLLMProvider] = useState<LLMProvider>('deepseek'); // 默认使用 DeepSeek
+  const [aiMode, setAIMode] = useState<AIMode>('mock');
+  const [llmProvider, setLLMProvider] = useState<LLMProvider>('deepseek');
 
   const selectedTransactions = mockTransactions.filter(t => selectedIds.includes(t.id));
+
+  /**
+   * 解析单行 A2UI 消息
+   */
+  const parseA2UIStreamMessage = (line: string): A2UIMessage | null => {
+    try {
+      const parsed = JSON.parse(line.trim());
+      if (['surfaceUpdate', 'dataModelUpdate', 'beginRendering', 'deleteSurface'].includes(parsed.type)) {
+        return parsed as A2UIMessage;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * 更新助手消息
+   */
+  const updateAssistantMessage = (msg: AIMessage, a2uiMsg: A2UIMessage): AIMessage => {
+    switch (a2uiMsg.type) {
+      case 'beginRendering':
+        return {
+          ...msg,
+          content: a2uiMsg.message || '正在生成 UI...',
+          isRendering: true,
+        };
+      case 'surfaceUpdate':
+        return {
+          ...msg,
+          content: '',
+          uiSchema: a2uiMsg.components,
+          isRendering: false,
+        };
+      case 'dataModelUpdate':
+        return {
+          ...msg,
+          dataModel: a2uiMsg.data,
+          isRendering: false,
+        };
+      case 'deleteSurface':
+        return {
+          ...msg,
+          content: '__deleted__',
+          isRendering: false,
+        };
+      default:
+        return msg;
+    }
+  };
 
   const handleAIReview = async () => {
     if (selectedIds.length === 0) {
@@ -25,6 +75,14 @@ const App: React.FC = () => {
 
     setIsDialogOpen(true);
     setIsLoading(true);
+
+    // 先添加一个用户消息表示触发了分析
+    const userMessage: AIMessage = {
+      role: 'user',
+      content: '分析选中的交易',
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
 
     try {
       const response = await fetch('/api/ai/review', {
@@ -44,8 +102,14 @@ const App: React.FC = () => {
 
       if (reader) {
         let accumulatedContent = '';
-        let uiComponent: A2UIComponent | undefined;
-        let uiSchema: any = undefined;
+        let currentAssistantMsg: AIMessage = {
+          role: 'assistant',
+          content: '',
+          timestamp: new Date(),
+        };
+
+        // 先添加一个占位消息
+        setMessages(prev => [...prev, currentAssistantMsg]);
 
         while (true) {
           const { done, value } = await reader.read();
@@ -54,26 +118,41 @@ const App: React.FC = () => {
           const chunk = decoder.decode(value, { stream: true });
           accumulatedContent += chunk;
 
-          // 尝试解析完整的 JSON
-          try {
-            const parsed = JSON.parse(accumulatedContent);
-            uiComponent = parsed.uiComponent;
-            uiSchema = parsed.uiSchema;
-            accumulatedContent = parsed.content || accumulatedContent;
-          } catch (e) {
-            // JSON 还未完整，继续累积
+          // 尝试解析完整的消息行
+          const lines = accumulatedContent.split('\n');
+          accumulatedContent = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+
+            const a2uiMsg = parseA2UIStreamMessage(line);
+            if (a2uiMsg) {
+              currentAssistantMsg = updateAssistantMessage(currentAssistantMsg, a2uiMsg);
+              setMessages(prev => {
+                const newMessages = [...prev];
+                if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
+                  newMessages[newMessages.length - 1] = { ...currentAssistantMsg };
+                }
+                return newMessages;
+              });
+            }
           }
         }
 
-        const assistantMessage: AIMessage = {
-          role: 'assistant',
-          content: accumulatedContent,
-          uiComponent,
-          uiSchema,
-          timestamp: new Date(),
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
+        // 处理剩余的内容
+        if (accumulatedContent.trim()) {
+          const a2uiMsg = parseA2UIStreamMessage(accumulatedContent);
+          if (a2uiMsg) {
+            currentAssistantMsg = updateAssistantMessage(currentAssistantMsg, a2uiMsg);
+            setMessages(prev => {
+              const newMessages = [...prev];
+              if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
+                newMessages[newMessages.length - 1] = { ...currentAssistantMsg };
+              }
+              return newMessages;
+            });
+          }
+        }
       }
     } catch (error) {
       console.error('AI Review error:', error);
@@ -118,8 +197,13 @@ const App: React.FC = () => {
 
       if (reader) {
         let accumulatedContent = '';
-        let uiComponent: A2UIComponent | undefined;
-        let uiSchema: any = undefined;
+        let currentAssistantMsg: AIMessage = {
+          role: 'assistant',
+          content: '',
+          timestamp: new Date(),
+        };
+
+        setMessages(prev => [...prev, currentAssistantMsg]);
 
         while (true) {
           const { done, value } = await reader.read();
@@ -128,26 +212,39 @@ const App: React.FC = () => {
           const chunk = decoder.decode(value, { stream: true });
           accumulatedContent += chunk;
 
-          // 尝试解析完整的 JSON
-          try {
-            const parsed = JSON.parse(accumulatedContent);
-            uiComponent = parsed.uiComponent;
-            uiSchema = parsed.uiSchema;
-            accumulatedContent = parsed.content || accumulatedContent;
-          } catch (e) {
-            // JSON 还未完整，继续累积
+          const lines = accumulatedContent.split('\n');
+          accumulatedContent = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+
+            const a2uiMsg = parseA2UIStreamMessage(line);
+            if (a2uiMsg) {
+              currentAssistantMsg = updateAssistantMessage(currentAssistantMsg, a2uiMsg);
+              setMessages(prev => {
+                const newMessages = [...prev];
+                if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
+                  newMessages[newMessages.length - 1] = { ...currentAssistantMsg };
+                }
+                return newMessages;
+              });
+            }
           }
         }
 
-        const assistantMessage: AIMessage = {
-          role: 'assistant',
-          content: accumulatedContent,
-          uiComponent,
-          uiSchema,
-          timestamp: new Date(),
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
+        if (accumulatedContent.trim()) {
+          const a2uiMsg = parseA2UIStreamMessage(accumulatedContent);
+          if (a2uiMsg) {
+            currentAssistantMsg = updateAssistantMessage(currentAssistantMsg, a2uiMsg);
+            setMessages(prev => {
+              const newMessages = [...prev];
+              if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
+                newMessages[newMessages.length - 1] = { ...currentAssistantMsg };
+              }
+              return newMessages;
+            });
+          }
+        }
       }
     } catch (error) {
       console.error('Chat error:', error);
@@ -162,9 +259,12 @@ const App: React.FC = () => {
     }
   }, [selectedTransactions, messages, aiMode]);
 
+  const handleClearMessages = useCallback(() => {
+    setMessages([]);
+  }, []);
+
   const handleAIModeChange = (mode: AIMode) => {
     setAIMode(mode);
-    // 清空历史消息
     setMessages([]);
   };
 
@@ -185,20 +285,19 @@ const App: React.FC = () => {
                 <p className="text-sm text-gray-500">Bank Transaction Management System with A2UI</p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-3">
-              {/* AI 模式指示器 */}
               <div className={`
                 flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium
-                ${aiMode === 'real' 
-                  ? 'bg-blue-100 text-blue-700' 
+                ${aiMode === 'real'
+                  ? 'bg-blue-100 text-blue-700'
                   : 'bg-green-100 text-green-700'
                 }
               `}>
                 {aiMode === 'real' ? (
                   <>
                     <Brain className="w-4 h-4" />
-                    <span>真实 AI</span>
+                    <span>真实 AI ({llmProvider === 'deepseek' ? 'DeepSeek' : '通义千问'})</span>
                   </>
                 ) : (
                   <>
@@ -207,8 +306,7 @@ const App: React.FC = () => {
                   </>
                 )}
               </div>
-              
-              {/* 设置按钮 */}
+
               <button
                 onClick={() => setIsSettingsOpen(true)}
                 className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
@@ -216,8 +314,7 @@ const App: React.FC = () => {
               >
                 <Settings className="w-5 h-5" />
               </button>
-            
-              {/* AI Review 按钮 */}
+
               <button
                 onClick={handleAIReview}
                 disabled={selectedIds.length === 0}
@@ -236,9 +333,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* 主内容区 */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 统计卡片 */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-lg shadow p-4">
             <p className="text-sm text-gray-500 mb-1">总交易数</p>
@@ -254,7 +349,7 @@ const App: React.FC = () => {
               <p className={`text-lg font-bold ${aiMode === 'real' ? 'text-blue-600' : 'text-green-600'}`}>
                 {aiMode === 'real' ? '真实 AI' : '模拟数据'}
               </p>
-              <button 
+              <button
                 onClick={() => setIsSettingsOpen(true)}
                 className="text-xs text-gray-400 hover:text-blue-500 underline"
               >
@@ -270,7 +365,32 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* 交易表格 */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 mb-6 border border-blue-100">
+          <p className="text-sm font-medium text-gray-700 mb-2">A2UI 流式消息类型</p>
+          <div className="flex flex-wrap gap-4 text-xs text-gray-600">
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
+              <code className="bg-white px-1.5 py-0.5 rounded">beginRendering</code>
+              开始渲染
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 bg-green-400 rounded-full"></span>
+              <code className="bg-white px-1.5 py-0.5 rounded">surfaceUpdate</code>
+              更新 UI
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 bg-yellow-400 rounded-full"></span>
+              <code className="bg-white px-1.5 py-0.5 rounded">dataModelUpdate</code>
+              更新数据
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 bg-red-400 rounded-full"></span>
+              <code className="bg-white px-1.5 py-0.5 rounded">deleteSurface</code>
+              删除 UI
+            </span>
+          </div>
+        </div>
+
         <div className="bg-white rounded-lg shadow">
           <TransactionTable
             transactions={mockTransactions}
@@ -280,7 +400,6 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* AI 对话框 */}
       <AIDialog
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
@@ -288,9 +407,9 @@ const App: React.FC = () => {
         messages={messages}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+        onClear={handleClearMessages}
       />
 
-      {/* 设置面板 */}
       <SettingsPanel
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}

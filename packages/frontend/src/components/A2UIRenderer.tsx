@@ -8,18 +8,24 @@ interface A2UIRendererProps {
 
 const A2UIRenderer: React.FC<A2UIRendererProps> = ({ component }) => {
   const renderComponent = (comp: A2UIComponent): React.ReactNode => {
-    switch (comp.type) {
+    // 支持 component 和 type 两种字段名（向后兼容）
+    const componentType = comp.component || (comp as any).type;
+    const content = (comp as any).content;
+    
+    switch (componentType) {
       case 'card':
+      case 'Card':
         return (
           <div className="bg-white rounded-lg shadow p-4 mb-4" {...comp.props}>
             {comp.children?.map((child, idx) => (
               <React.Fragment key={idx}>{renderComponent(child)}</React.Fragment>
             ))}
-            {comp.content && <p className="text-gray-700">{comp.content}</p>}
+            {content && <p className="text-gray-700">{content}</p>}
           </div>
         );
 
       case 'list':
+      case 'List':
         return (
           <ul className="space-y-2 mb-4" {...comp.props}>
             {comp.children?.map((child, idx) => (
@@ -32,8 +38,9 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({ component }) => {
         );
 
       case 'table':
-        const rows = comp.props?.rows || [];
-        const headers = comp.props?.headers || [];
+      case 'Table':
+        const rows = comp.props?.rows || comp.props?.dataSource || [];
+        const headers = comp.props?.headers || comp.props?.columns?.map((c: any) => c.title) || [];
         return (
           <div className="overflow-x-auto mb-4">
             <table className="min-w-full divide-y divide-gray-200" {...comp.props}>
@@ -49,13 +56,20 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({ component }) => {
                 </thead>
               )}
               <tbody className="bg-white divide-y divide-gray-200">
-                {rows.map((row: any[], idx: number) => (
+                {rows.map((row: any, idx: number) => (
                   <tr key={idx}>
-                    {row.map((cell, cellIdx) => (
-                      <td key={cellIdx} className="px-4 py-2 text-sm text-gray-900">
-                        {cell}
-                      </td>
-                    ))}
+                    {Array.isArray(row) 
+                      ? row.map((cell, cellIdx) => (
+                          <td key={cellIdx} className="px-4 py-2 text-sm text-gray-900">
+                            {cell}
+                          </td>
+                        ))
+                      : Object.values(row).map((cell: any, cellIdx) => (
+                          <td key={cellIdx} className="px-4 py-2 text-sm text-gray-900">
+                            {cell}
+                          </td>
+                        ))
+                    }
                   </tr>
                 ))}
               </tbody>
@@ -64,6 +78,7 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({ component }) => {
         );
 
       case 'text':
+      case 'Text':
         const variant = comp.props?.variant || 'body';
         const textClasses = {
           h1: 'text-2xl font-bold mb-3',
@@ -74,11 +89,12 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({ component }) => {
         };
         return (
           <p className={`text-gray-800 ${textClasses[variant as keyof typeof textClasses]}`} {...comp.props}>
-            {comp.content}
+            {content}
           </p>
         );
 
       case 'alert':
+      case 'Alert':
         const alertType = comp.props?.type || 'info';
         const alertConfig = {
           info: { bg: 'bg-blue-50', border: 'border-blue-200', icon: Info, color: 'text-blue-700' },
@@ -92,7 +108,7 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({ component }) => {
           <div className={`${config.bg} ${config.border} border rounded-lg p-4 mb-4 flex items-start gap-3`} {...comp.props}>
             <IconComponent className={`w-5 h-5 ${config.color} mt-0.5`} />
             <div className={`text-sm ${config.color}`}>
-              {comp.content}
+              {content}
               {comp.children?.map((child, idx) => (
                 <React.Fragment key={idx}>{renderComponent(child)}</React.Fragment>
               ))}
@@ -101,6 +117,7 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({ component }) => {
         );
 
       case 'badge':
+      case 'Badge':
         const badgeVariant = comp.props?.variant || 'default';
         const badgeClasses = {
           default: 'bg-gray-100 text-gray-800',
@@ -114,17 +131,25 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({ component }) => {
             className={`px-2 py-1 text-xs rounded-full ${badgeClasses[badgeVariant as keyof typeof badgeClasses]}`} 
             {...comp.props}
           >
-            {comp.content}
+            {content}
           </span>
         );
 
       case 'divider':
+      case 'Divider':
         return <hr className="my-4 border-gray-200" {...comp.props} />;
 
       case 'grid':
-        const cols = comp.props?.cols || 2;
+      case 'Grid':
+        const cols = comp.props?.cols || comp.props?.columns || 2;
+        const gridCols: Record<number, string> = {
+          1: 'grid-cols-1',
+          2: 'grid-cols-2',
+          3: 'grid-cols-3',
+          4: 'grid-cols-4',
+        };
         return (
-          <div className={`grid grid-cols-${cols} gap-4 mb-4`} {...comp.props}>
+          <div className={`grid ${gridCols[cols] || 'grid-cols-2'} gap-4 mb-4`} {...comp.props}>
             {comp.children?.map((child, idx) => (
               <React.Fragment key={idx}>{renderComponent(child)}</React.Fragment>
             ))}
@@ -134,8 +159,8 @@ const A2UIRenderer: React.FC<A2UIRendererProps> = ({ component }) => {
       default:
         return (
           <div className="p-4 bg-gray-100 rounded mb-2">
-            <p className="text-sm text-gray-600">未知组件类型: {comp.type}</p>
-            {comp.content && <p className="mt-2 text-gray-800">{comp.content}</p>}
+            <p className="text-sm text-gray-600">未知组件类型: {componentType}</p>
+            {content && <p className="mt-2 text-gray-800">{content}</p>}
           </div>
         );
     }

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 // 替换为 OpenAI SDK，用于阿里云 DashScope 兼容模式
 import OpenAI from 'openai';
-import { generateMockQueryResult } from '../mockDataGenerator.js';
+import { generateMockQueryResult } from '../mockDataGenerator';
 
 export const queryRouter = Router();
 

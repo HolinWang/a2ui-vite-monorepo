@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
-import { aiRouter } from './routes/ai.js';
-import { exportRouter } from './routes/export.js';
-import { queryRouter } from './routes/query.js';
+import { aiRouter } from './routes/ai';
+import { exportRouter } from './routes/export';
+import { queryRouter } from './routes/query';
 
 const app = express();
 // 强制使用 3000 端口，避免使用系统保留的 9000 端口
