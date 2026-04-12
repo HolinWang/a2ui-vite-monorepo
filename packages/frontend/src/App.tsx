@@ -1,10 +1,14 @@
 import React, { useState, useCallback } from 'react';
-import { Bot, FileText, Settings, Database, Brain } from 'lucide-react';
+import { Bot, FileText, Settings, Database, Brain, Layers, Zap } from 'lucide-react';
 import TransactionTable from './components/TransactionTable';
 import AIDialog from './components/AIDialog';
+import AGUIExample from './components/AGUIExample';
 import SettingsPanel, { AIMode, LLMProvider } from './components/SettingsPanel';
 import { mockTransactions } from './data/mockData';
 import { AIMessage, A2UIMessage } from './types';
+
+// UI 协议模式
+type UIProtocol = 'a2ui' | 'ag-ui';
 
 const App: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -14,6 +18,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [aiMode, setAIMode] = useState<AIMode>('mock');
   const [llmProvider, setLLMProvider] = useState<LLMProvider>('deepseek');
+  const [uiProtocol, setUIProtocol] = useState<UIProtocol>('a2ui');
+  const [showAGUI, setShowAGUI] = useState(false);
 
   const selectedTransactions = mockTransactions.filter(t => selectedIds.includes(t.id));
 
@@ -287,6 +293,36 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
+              {/* UI 协议切换 */}
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => { setUIProtocol('a2ui'); setShowAGUI(false); }}
+                  className={`
+                    flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all
+                    ${uiProtocol === 'a2ui'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                    }
+                  `}
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>A2UI</span>
+                </button>
+                <button
+                  onClick={() => { setUIProtocol('ag-ui'); setShowAGUI(true); }}
+                  className={`
+                    flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all
+                    ${uiProtocol === 'ag-ui'
+                      ? 'bg-white text-purple-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                    }
+                  `}
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>AG-UI</span>
+                </button>
+              </div>
+
               <div className={`
                 flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium
                 ${aiMode === 'real'
@@ -391,6 +427,34 @@ const App: React.FC = () => {
           </div>
         </div>
 
+        {uiProtocol === 'ag-ui' && (
+          <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-4 mb-6 border border-purple-100">
+            <p className="text-sm font-medium text-gray-700 mb-2">AG-UI 协议说明</p>
+            <div className="flex flex-wrap gap-4 text-xs text-gray-600">
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 bg-purple-400 rounded-full"></span>
+                <code className="bg-white px-1.5 py-0.5 rounded">Agent</code>
+                决策中心
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 bg-pink-400 rounded-full"></span>
+                <code className="bg-white px-1.5 py-0.5 rounded">Runtime</code>
+                执行渲染
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 bg-indigo-400 rounded-full"></span>
+                <code className="bg-white px-1.5 py-0.5 rounded">Action</code>
+                触发事件
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 bg-rose-400 rounded-full"></span>
+                <code className="bg-white px-1.5 py-0.5 rounded">State</code>
+                状态管理
+              </span>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-lg shadow">
           <TransactionTable
             transactions={mockTransactions}
@@ -398,6 +462,22 @@ const App: React.FC = () => {
             onSelectionChange={setSelectedIds}
           />
         </div>
+
+        {/* AG-UI 示例区域 - 仅在 AG-UI 模式下显示 */}
+        {showAGUI && (
+          <div className="mt-6">
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-purple-600" />
+                AG-UI 交互示例
+              </h2>
+              <AGUIExample
+                transactions={mockTransactions}
+                selectedIds={selectedIds}
+              />
+            </div>
+          </div>
+        )}
       </main>
 
       <AIDialog
